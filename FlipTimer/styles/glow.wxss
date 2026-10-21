@@ -1,0 +1,133 @@
+/* 边缘渗透光 —— 规则见 CONSTITUTION.md C-7.5、C-7.15
+   只在 alert 态由 .glow-on 驱动呼吸；其余状态 .glow 的 opacity 为 0。
+
+   这里只管**几何和动画**：定位、层数、呼吸周期、预览条尺寸。
+   颜色和 alpha 不在这里 —— 由 utils/prefs.js 的 glowStyles() 拼成完整
+   box-shadow / gradient 字符串，绑在节点的 style 属性上。
+
+   原因：WXSS 编译期会校验 rgba() 的每个参数，遇到 CSS 变量这种非数值
+   就把整条声明丢掉。不报错、控制台干净，真机上就是「到点了但一片黑」。
+   样式走 style 属性是运行时字符串，WebView 直接解析，绕开编译期校验。 */
+
+.glow,
+.glow-far {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+/* 近场：只管贴边最亮那一圈，3 层足够——堆层数都在同一小段距离里衰减。
+   禁 spread（先扩实心区再模糊，内沿必是断崖）、禁 border-radius（四角出弧线）。 */
+.glow {
+  opacity: 0;
+  transition: opacity 900ms ease;
+}
+
+/* 远场：box-shadow 的高斯衰减在 30vh 外已掉到看不见，
+   带宽只能靠渐变带补出来，每条用 background-size 限定 24%。 */
+.glow-far {
+  background-repeat: no-repeat;
+}
+
+/* 静态 opacity: 1 是兜底，不是装饰（C-7.16）。
+   呼吸全靠 animation 改 opacity，而 .glow 的基准值是 0。
+   一旦动画跑不起来——iOS「减弱动态效果」、低电量模式、WebView 回收合成层、
+   个别机型省电策略——animation 不生效，opacity 就停在 0。
+   现象和 C-7.15 那个坑一模一样：到点了，屏幕一片黑。
+   给了静态 1 之后：动画正常时照旧呼吸；动画被掐掉时静态全亮，光还在。 */
+.glow-on {
+  opacity: 1;
+  animation: breathe 5s ease-in-out infinite;
+}
+
+/* 5 秒一呼一吸，接近成人静息呼吸频率（12 次/分）。
+   谷底 0.3 不更低：光要一直"在"，只是弱。落到 0.2 时边缘 alpha 只剩
+   0.076，一个周期里大半时间"看起来没在提醒"。 */
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ===== 设置面板里的实时预览 =====
+   待机态屏幕本身不发光，改配色时看不到效果等于盲选。
+   这条横带用同一套变量、同一套呼吸动画，选完立刻能看见区别。
+
+   高度给到 12vh：给矮了（7vh 左右）模糊半径一摊就糊成一块均匀色块，
+   看不出是"边缘亮、向内淡"。盒子小的时候必须留够中间的黑。 */
+.glow-preview {
+  height: 12vh;
+  margin-bottom: 2.4vh;
+  border-radius: 1vh;
+  background: #000000;
+  animation: breathe 5s ease-in-out infinite;
+}
+
+/* ===== 配色三选一 ===== */
+.swatch-row {
+  display: flex;
+  gap: 1.6vw;
+}
+
+.swatch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1vh;
+  flex: 1;
+  min-height: 7vh;
+  border: 1px solid #262320;
+  border-radius: 1vh;
+  font-size: 2.6vh;
+  color: #6b665e;
+  letter-spacing: 0.08em;
+}
+
+.swatch.on {
+  border-color: rgba(216, 210, 200, 0.55);
+  color: #d8d2c8;
+}
+
+/* 色点本身就是这一档的颜色，不靠文字说明（颜色由 WXML 内联写入） */
+.swatch-dot {
+  width: 2.2vh;
+  height: 2.2vh;
+  border-radius: 50%;
+  opacity: 0.55;
+}
+
+.swatch.on .swatch-dot {
+  opacity: 1;
+}
+
+/* ===== 强度三档 ===== */
+.level-row {
+  display: flex;
+  gap: 1.6vw;
+  margin-top: 1.8vh;
+}
+
+.level {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 6.4vh;
+  border: 1px solid #262320;
+  border-radius: 1vh;
+  font-size: 2.4vh;
+  color: #6b665e;
+  letter-spacing: 0.1em;
+}
+
+.level.on {
+  border-color: rgba(216, 210, 200, 0.55);
+  color: #d8d2c8;
+}

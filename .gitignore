@@ -1,0 +1,18 @@
+# ===== WeChat Mini Program 构建产物 =====
+miniprogram_npm/
+node_modules/
+
+# ===== 操作系统 / 编辑器 =====
+.DS_Store
+Thumbs.db
+*.log
+
+# ===== 预览产物（截图 / 二维码，非源码） =====
+_preview/
+FlipTimer/_preview/
+
+# ===== WorkBuddy 项目记忆（个人数据，不入库） =====
+.workbuddy/
+
+# ===== 本地私有配置 =====
+project.private.config.json

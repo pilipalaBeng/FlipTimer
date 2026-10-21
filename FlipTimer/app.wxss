@@ -1,0 +1,7 @@
+/* 全局：纯黑底，禁止选中与滚动 */
+page {
+  background: #000000;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}

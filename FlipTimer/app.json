@@ -1,0 +1,12 @@
+{
+  "pages": [
+    "pages/clock/index"
+  ],
+  "window": {
+    "navigationStyle": "custom",
+    "backgroundColor": "#000000",
+    "backgroundTextStyle": "dark"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

@@ -1,0 +1,370 @@
+@import "../../styles/glow.wxss";
+
+/* ===== 舞台 ===== */
+.stage {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #000000;
+}
+
+/* ===== 内容层 ===== */
+/* 曾经叫「翻转跟随层」，做 180° 主动补偿。1.20 版把它删了：系统已经在转页面，
+   再转一次就是两遍，真机上表现为「翻完字是倒的」（C-7.11）。这里只留居中布局。 */
+.flipper {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ===== 常驻状态点：告诉用户"它活着" ===== */
+.power-dot {
+  position: absolute;
+  top: 2.4vh;
+  left: 50%;
+  width: 0.7vh;
+  height: 0.7vh;
+  margin-left: -0.35vh;
+  border-radius: 50%;
+  background: #3a3631;
+}
+
+/* ===== 主显示 ===== */
+/* 绝对铺满：长按取消要有一块够大的落手区，不能只让用户去戳数字本身 */
+.main {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.readout {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+}
+
+/* 防烧屏：刻意不做像素偏移。
+   1px 相对 9vh 的大字（真机上近百像素高）只换掉约百分之一的行，
+   对 OLED 老化差异没有实际作用，属于伪防护而不是防护。
+   真要防只能降亮度或大幅位移，不属于当前版本范围。 */
+
+.time {
+  font-family: 'DIN Alternate', 'SF Mono', 'Roboto Mono', Menlo, Consolas, monospace;
+  font-size: 42vh;
+  font-weight: 300;
+  line-height: 1;
+  color: #d8d2c8;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  transition: color 700ms ease, font-size 500ms ease;
+}
+
+/* 最后一分钟多出 :ss 两段，字符从 5 个涨到 8 个。
+   不缩字号会横向溢出，缩太多又会显得数字突然变小，
+   42vh → 30vh 让两种格式占屏宽的比例接近（约 64% / 71%），
+   再加 font-size 过渡，切换时不跳。 */
+.time.with-sec {
+  font-size: 30vh;
+  color: #f5f1e8;
+}
+
+/* ===== 提醒态 ===== */
+/* 提醒态不换中间的字，所以这里没有专门的标题样式。
+   唯一的视觉变化是 .glow —— 换字会把时钟从屏幕上拿走。 */
+
+/* ===== 已关闭反馈 ===== */
+.closed-title {
+  font-size: 4.6vh;
+  font-weight: 300;
+  color: #8d877d;
+  letter-spacing: 0.2em;
+  text-indent: 0.2em;
+}
+
+/* ===== 提醒时间 ===== */
+.target {
+  position: absolute;
+  right: 5vw;
+  bottom: 2.8vh;
+  font-size: 2.4vh;
+  color: #423e38;
+  letter-spacing: 0.08em;
+}
+
+/* ===== 底部状态小字 ===== */
+.status {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 2.8vh;
+  text-align: center;
+  font-size: 2.6vh;
+  color: #56514a;
+  letter-spacing: 0.12em;
+}
+
+/* ===== 边缘悬浮钮 ===== */
+/* 位置由 JS 用微信胶囊的矩形算出来（见 utils/fab-pos.js），
+   这里只是拿不到胶囊时的兜底值。z-index 压过旋转层，
+   否则全屏的 .main 会把点击吃掉。 */
+.fab {
+  position: absolute;
+  top: 13vh;
+  right: 3vw;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+/* 收起态就是一根细棍：看得出、戳得中，但不抢主视觉。
+   点击区靠 min-height 撑到 8vh，视觉仍是细棍本身。 */
+.fab-pin {
+  position: relative;
+  min-width: 11vh;
+  min-height: 8vh;
+}
+
+.fab-pin::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 7vh;
+  height: 0.8vh;
+  margin-top: -0.4vh;
+  border-radius: 999px;
+  background: #33302c;
+  transition: background 200ms ease;
+}
+
+.fab-pin.open::after {
+  background: #4a453f;
+}
+
+/* 展开的菜单从右上角长出来，收起时立即不可见也不再接收点击，
+   避免透明菜单留在那儿等着被误触 */
+.fab-menu {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1.2vh;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-1.2vh) scale(0.92);
+  transform-origin: top right;
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 200ms cubic-bezier(0.33, 0, 0.2, 1),
+    visibility 0s linear 200ms;
+}
+
+.fab-menu.on {
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  transition: opacity 180ms ease, transform 200ms cubic-bezier(0.33, 0, 0.2, 1),
+    visibility 0s;
+}
+
+.fab-item {
+  display: flex;
+  align-items: center;
+  gap: 1.4vh;
+  min-height: 7vh;
+  padding: 0 2.6vh;
+  border: 1px solid #2a2724;
+  border-radius: 999px;
+  background: rgba(8, 8, 8, 0.94);
+  font-size: 2.4vh;
+  color: #9a948a;
+  letter-spacing: 0.12em;
+}
+
+/* ===== 菜单图标：纯 CSS，不用字体也不用图片 ===== */
+.ico {
+  position: relative;
+  flex: 0 0 auto;
+  width: 2.8vh;
+  height: 2.8vh;
+}
+
+.ico-clock {
+  border: 1px solid #56514a;
+  border-radius: 50%;
+}
+
+.ico-clock::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1px;
+  height: 26%;
+  background: #56514a;
+  transform: translate(-50%, -100%);
+}
+
+.ico-play::after {
+  content: '';
+  position: absolute;
+  left: 46%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  border-left: 2.1vh solid #56514a;
+  border-top: 1.2vh solid transparent;
+  border-bottom: 1.2vh solid transparent;
+  transform: translateY(-50%);
+}
+
+.ico-x::before,
+.ico-x::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2.4vh;
+  height: 1px;
+  background: #56514a;
+}
+
+.ico-x::before {
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.ico-x::after {
+  transform: translateX(-50%) rotate(-45deg);
+}
+
+/* 光色：圆环里一颗点，和「时长」的时钟轮廓区分得开 */
+.ico-glow {
+  border: 1px solid #56514a;
+  border-radius: 50%;
+}
+
+.ico-glow::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1.1vh;
+  height: 1.1vh;
+  margin: -0.55vh 0 0 -0.55vh;
+  border-radius: 50%;
+  background: #56514a;
+}
+
+/* ===== 时长选择层 ===== */
+.panel-mask {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.88);
+}
+
+.panel {
+  width: 56vw;
+  padding: 3.4vh 3vw;
+  border: 1px solid #262320;
+  border-radius: 1.6vh;
+  background: #0b0b0b;
+}
+
+.panel-title {
+  font-size: 2.8vh;
+  color: #8d877d;
+  letter-spacing: 0.14em;
+}
+
+.panel-hint {
+  margin: 0.8vh 0 2.2vh;
+  font-size: 2.1vh;
+  color: #4a453f;
+  letter-spacing: 0.06em;
+}
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.6vh 1.6vw;
+}
+
+/* 四列固定宽度，8 档正好两行；用 flex 平分会在换行后间距错位 */
+.preset {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 calc((100% - 4.8vw) / 4);
+  min-height: 7vh;
+  border: 1px solid #262320;
+  border-radius: 1vh;
+  font-size: 3.4vh;
+  font-weight: 300;
+  color: #6b665e;
+}
+
+.preset.on {
+  border-color: #5ed6a0;
+  color: #d8d2c8;
+}
+
+.custom-row {
+  display: flex;
+  align-items: center;
+  margin-top: 2.4vh;
+  gap: 2vw;
+}
+
+.custom-input {
+  flex: 1;
+  padding: 2vh 2vw;
+  border: 1px solid #262320;
+  border-radius: 1vh;
+  font-size: 3vh;
+  color: #d8d2c8;
+}
+
+.ph {
+  color: #3a3631;
+}
+
+.custom-unit {
+  font-size: 2.6vh;
+  color: #56514a;
+}
+
+.custom-ok {
+  display: flex;
+  align-items: center;
+  min-height: 6.6vh;
+  padding: 0 3vw;
+  border-radius: 1vh;
+  background: #1a1a18;
+  font-size: 2.6vh;
+  color: #c9c3b8;
+}

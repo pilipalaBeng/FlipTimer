@@ -1,0 +1,138 @@
+<!-- 全屏舞台：仅提醒态响应整屏点击 -->
+<!-- 发光样式由 prefs.glowStyles() 拼成完整字符串，直接绑在发光层上。
+     不用 CSS 变量：WXSS 编译期会校验 rgba() 参数，碰到 var() 就整条丢弃。 -->
+<view class="stage" bindtap="onStageTap">
+
+  <!-- 边缘悬浮钮：贴在微信胶囊（··· / ×）正下方。
+       放在内容层之外 —— 胶囊是原生层，系统旋转页面时它和页面坐标系不同步。
+       收起态只是一根细棍；点开长出菜单，3 秒不动自己缩回。 -->
+  <view class="fab" style="{{fabStyle}}"
+    wx:if="{{!showPanel && state !== 'running' && state !== 'closed'}}"
+  >
+    <view class="fab-pin {{fabOpen ? 'open' : ''}}" catchtap="onToggleFab"></view>
+
+    <view class="fab-menu {{fabOpen ? 'on' : ''}}">
+      <block wx:if="{{state === 'idle'}}">
+        <view class="fab-item" catchtap="onOpenPanel" data-mode="duration">
+          <view class="ico ico-clock"></view>
+          <text>时长</text>
+        </view>
+        <view class="fab-item" catchtap="onOpenPanel" data-mode="glow">
+          <view class="ico ico-glow"></view>
+          <text>光色</text>
+        </view>
+        <view class="fab-item" catchtap="onStartTap">
+          <view class="ico ico-play"></view>
+          <text>开始</text>
+        </view>
+      </block>
+      <view class="fab-item" wx:else catchtap="onCloseTap">
+        <view class="ico ico-x"></view>
+        <text>关闭</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 内容层。**不做 180° 主动补偿**：页面固定横屏（pageOrientation: landscape），
+       手机立在桌面上翻 180° 时重力向量整体反号，系统会自己把页面转过来，
+       内容本就是正立的；再转一次等于转了两遍，用户看到的字是倒的（C-7.11）。 -->
+  <view class="flipper">
+
+    <!-- 常驻极淡状态点，避免全黑被误认为关机 -->
+    <view class="power-dot"></view>
+
+    <!-- 边缘渗透光：近场靠 box-shadow，远场靠 .glow-far 的四边渐变 -->
+    <view class="glow {{state === 'alert' ? 'glow-on' : ''}}" style="{{glowStyle.near}}">
+      <view class="glow-far" style="{{glowStyle.far}}"></view>
+    </view>
+
+    <!-- 主显示区：长按中央区 = 计时中取消本轮 / 提醒中关闭 -->
+    <view class="main" bindlongpress="onMainLongPress">
+      <block wx:if="{{state === 'closed'}}">
+        <view class="closed-title">{{noticeText}}</view>
+      </block>
+
+      <!-- 其余状态一律显示当前时间：这台东西首先是时钟，
+           提醒时也不换字，只让边缘的光去说"到点了"。
+           字换了反而是噪音，还顺带把时钟从屏幕上拿走了。 -->
+      <block wx:else>
+        <view class="readout">
+          <text class="time {{finalPhase ? 'with-sec' : ''}}">{{mainText}}</text>
+        </view>
+      </block>
+    </view>
+
+    <!-- 提醒时间，仅计时态 -->
+    <view class="target" wx:if="{{targetText}}">{{targetText}}</view>
+
+    <!-- 底部状态小字 -->
+    <view class="status">{{statusText}}</view>
+
+    <!-- 设置层：间隔 / 提醒光共用一层遮罩，靠 panelMode 切换内容 -->
+    <view class="panel-mask" wx:if="{{showPanel}}" catchtap="onClosePanel">
+      <view class="panel" catchtap="noop">
+
+        <block wx:if="{{panelMode === 'glow'}}">
+          <view class="panel-title">提醒光</view>
+          <view class="panel-hint">只改边缘的光，中间的时间不动</view>
+
+          <!-- 待机态屏幕本来不发光，不给预览就是盲选 -->
+          <view class="glow-preview" style="{{glowStyle.pre}}"></view>
+
+          <view class="swatch-row">
+            <view
+              wx:for="{{glowColors}}"
+              wx:key="id"
+              class="swatch {{item.id === glowColor ? 'on' : ''}}"
+              catchtap="onPickGlow"
+              data-color="{{item.id}}"
+            >
+              <view class="swatch-dot" style="background: rgb({{item.rgb}})"></view>
+              <text>{{item.name}}</text>
+            </view>
+          </view>
+
+          <view class="level-row">
+            <view
+              wx:for="{{glowLevels}}"
+              wx:key="id"
+              class="level {{item.id === glowLevel ? 'on' : ''}}"
+              catchtap="onPickGlow"
+              data-level="{{item.id}}"
+            >{{item.name}}</view>
+          </view>
+        </block>
+
+        <block wx:else>
+          <view class="panel-title">多久提醒一次</view>
+          <view class="panel-hint">点数字填进去，按确定生效</view>
+
+          <view class="preset-row">
+            <view
+              wx:for="{{presets}}"
+              wx:key="*this"
+              class="preset {{customMin == item ? 'on' : ''}}"
+              catchtap="onPickPreset"
+              data-min="{{item}}"
+            >{{item}}</view>
+          </view>
+
+          <view class="custom-row">
+            <input
+              class="custom-input"
+              type="number"
+              maxlength="3"
+              value="{{customMin}}"
+              bindinput="onCustomInput"
+              placeholder="其他分钟数"
+              placeholder-class="ph"
+            />
+            <view class="custom-unit">分钟</view>
+            <view class="custom-ok" catchtap="onConfirmCustom">确定</view>
+          </view>
+        </block>
+      </view>
+    </view>
+  </view>
+  <!-- /flipper 旋转层到此为止，悬浮钮必须在它外面 -->
+</view>

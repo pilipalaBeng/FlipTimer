@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<!-- ⚠️ 这个页面跑在 Chrome 里，只用来量构图和带宽，**不代表真机渲染**。
+     Chrome 支持 rgba(var(--gc), …)，微信 WXSS 不支持 —— 编译期会把整条声明丢掉。
+     2026-10-20 真机实测：本页光效正常，小程序里到点一片黑。C-7.15 有记录。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>视觉翻转闹钟 · 界面预览</title>
+<style>
+  :root {
+    --u: 6px;
+    --ink: #d8d2c8;
+    --ink-bright: #f5f1e8;
+    --dim: #56514a;
+    --faint: #423e38;
+    --line: #262320;
+    --glow: #5ed6a0;
+    /* 与小程序同源的发光变量：--gc 颜色通道，--a1..3 近场 alpha，--fa 远场 */
+    --gc: 94, 214, 160;
+    --a1: .38;
+    --a2: .26;
+    --a3: .17;
+    --fa: .14;
+    --mono: 'DIN Alternate', 'SF Mono', 'Roboto Mono', Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    padding: 40px 20px;
+    background: #080808;
+    font-family: var(--mono);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ===== 设备框 ===== */
+  .device {
+    position: relative;
+    width: min(92vw, 900px);
+    aspect-ratio: 19.5 / 9;
+    overflow: hidden;
+    background: #000;
+    border: 1px solid #1a1a18;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* 翻转跟随层：整层旋转，内容相对人眼保持正立 */
+  .flipper {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: rotate(0deg);
+    transition: transform 620ms cubic-bezier(.33, 0, .2, 1);
+  }
+
+  .flipper.up {
+    transform: rotate(180deg);
+  }
+
+  /* 极淡状态点 */
+  .dot {
+    position: absolute;
+    top: calc(var(--u) * 2.4);
+    left: 50%;
+    width: calc(var(--u) * 0.7);
+    height: calc(var(--u) * 0.7);
+    margin-left: calc(var(--u) * -0.35);
+    border-radius: 50%;
+    background: #3a3631;
+  }
+
+  /* 边缘渗透光：近场靠 box-shadow（贴边最亮），远场靠四条渐变带。
+     每条渐变用自己的 24% 条带从 .14 走完到 0，中途不截断，所以没有折线。 */
+  .glow {
+    position: absolute;
+    inset: 0;
+    box-shadow:
+      inset 0 0 calc(var(--u) * 2) rgba(var(--gc), var(--a1)),
+      inset 0 0 calc(var(--u) * 6) rgba(var(--gc), var(--a2)),
+      inset 0 0 calc(var(--u) * 12) rgba(var(--gc), var(--a3));
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .9s ease;
+  }
+
+  .glow-far {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(to bottom, rgba(var(--gc), var(--fa)), rgba(var(--gc), 0)),
+      linear-gradient(to top,    rgba(var(--gc), var(--fa)), rgba(var(--gc), 0)),
+      linear-gradient(to right,  rgba(var(--gc), var(--fa)), rgba(var(--gc), 0)),
+      linear-gradient(to left,   rgba(var(--gc), var(--fa)), rgba(var(--gc), 0));
+    background-size: 100% 24%, 100% 24%, 24% 100%, 24% 100%;
+    background-position: top left, bottom left, top left, top right;
+    background-repeat: no-repeat;
+  }
+
+  /* 与 utils/../styles/glow.wxss 的 .glow-on 保持一致：
+     静态 opacity: 1 是兜底，动画停掉（减弱动态效果 / 低电量）时仍然全亮。
+     呼吸只管"强弱"，不管"有没有"。 */
+  [data-state="alert"] .glow {
+    opacity: 1;
+    animation: breathe 5s ease-in-out infinite;
+  }
+
+  /* ?peak=1 把呼吸钉在最亮相位，静态看/截图用 */
+  [data-peak] .glow { animation: none; opacity: 1; }
+
+  @keyframes breathe {
+    0%, 100% { opacity: .3; }
+    50% { opacity: 1; }
+  }
+
+  /* ===== 中央内容 ===== */
+  .center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .readout {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+  }
+
+  .time {
+    font-size: calc(var(--u) * 42);
+    font-weight: 300;
+    line-height: 1;
+    letter-spacing: .04em;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    transition: color .7s ease, font-size .5s ease;
+  }
+
+  /* HH:mm:ss 多两段冒号（5 字符 → 8 字符），字号收小，
+     缩完占屏宽比例与 HH:mm 接近，切换时不跳 */
+  .readout.sec .time { font-size: calc(var(--u) * 30); }
+  .readout.bright .time { color: var(--ink-bright); }
+
+  /* 提醒态不换字：中间仍是时钟，提醒只由边缘的光表达 */
+  .closedbox { display: none; }
+  [data-state="closed"] .closedbox { display: block; }
+  [data-state="closed"] .readout { display: none; }
+  .closedbox {
+    font-size: calc(var(--u) * 4.6);
+    font-weight: 300;
+    color: #8d877d;
+    letter-spacing: .2em;
+    text-indent: .2em;
+  }
+
+  /* ===== 底部与角标 ===== */
+  .target {
+    position: absolute;
+    right: calc(var(--u) * 5);
+    bottom: calc(var(--u) * 2.8);
+    font-size: calc(var(--u) * 2.4);
+    color: var(--faint);
+    letter-spacing: .08em;
+    display: none;
+  }
+
+  [data-state="running"] .target { display: block; }
+
+  .status {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--u) * 2.8);
+    text-align: center;
+    font-size: calc(var(--u) * 2.6);
+    color: var(--dim);
+    letter-spacing: .12em;
+  }
+
+  /* ===== 微信胶囊（真实存在的系统层，仅示意位置） ===== */
+  .capsule {
+    position: absolute;
+    top: calc(var(--u) * 1.6);
+    right: calc(var(--u) * 1.6);
+    display: flex;
+    align-items: center;
+    gap: calc(var(--u) * 2);
+    height: calc(var(--u) * 7.6);
+    padding: 0 calc(var(--u) * 2);
+    border: 1px dashed #2a2724;
+    border-radius: 999px;
+    font-size: calc(var(--u) * 2.4);
+    color: #3a3631;
+    pointer-events: none;
+  }
+
+  .capsule i {
+    width: 1px;
+    height: 50%;
+    background: #2a2724;
+  }
+
+  /* ===== 边缘悬浮钮：贴在胶囊正下方，不进旋转层 ===== */
+  .fab {
+    position: absolute;
+    top: calc(var(--u) * 10.4);
+    right: calc(var(--u) * 1.6);
+    z-index: 20;
+    display: none;
+    flex-direction: column;
+    align-items: flex-end;
+  }
+
+  [data-state="idle"] .fab,
+  [data-state="alert"] .fab { display: flex; }
+
+  .fab-pin {
+    position: relative;
+    width: calc(var(--u) * 11);
+    height: calc(var(--u) * 8);
+    cursor: pointer;
+  }
+
+  .fab-pin::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    right: 0;
+    width: calc(var(--u) * 7);
+    height: calc(var(--u) * .8);
+    margin-top: calc(var(--u) * -.4);
+    border-radius: 999px;
+    background: #33302c;
+    transition: background .2s;
+  }
+
+  .fab-pin.open::after { background: #4a453f; }
+
+  .fab-menu {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: calc(var(--u) * 1.2);
+    visibility: hidden;
+    opacity: 0;
+    transform: translateY(calc(var(--u) * -1.2)) scale(.92);
+    transform-origin: top right;
+    pointer-events: none;
+    transition: opacity .18s ease, transform .2s cubic-bezier(.33, 0, .2, 1), visibility 0s linear .2s;
+  }
+
+  .fab-menu.on {
+    visibility: visible;
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+    transition: opacity .18s ease, transform .2s cubic-bezier(.33, 0, .2, 1), visibility 0s;
+  }
+
+  .fab-item {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--u) * 1.4);
+    min-height: calc(var(--u) * 7);
+    padding: 0 calc(var(--u) * 2.6);
+    border: 1px solid #2a2724;
+    border-radius: 999px;
+    background: rgba(8, 8, 8, .94);
+    font-size: calc(var(--u) * 2.4);
+    color: #9a948a;
+    letter-spacing: .12em;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .act-close { display: none; }
+  [data-state="alert"] .act-close { display: flex; }
+  [data-state="alert"] .act-dur,
+  [data-state="alert"] .act-start { display: none; }
+
+  /* 图标：纯 CSS */
+  .ico {
+    position: relative;
+    flex: 0 0 auto;
+    width: calc(var(--u) * 2.8);
+    height: calc(var(--u) * 2.8);
+  }
+
+  .ico-clock { border: 1px solid #56514a; border-radius: 50%; }
+
+  .ico-clock::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 1px;
+    height: 26%;
+    background: #56514a;
+    transform: translate(-50%, -100%);
+  }
+
+  .ico-play::after {
+    content: '';
+    position: absolute;
+    left: 46%;
+    top: 50%;
+    width: 0;
+    height: 0;
+    border-left: calc(var(--u) * 2.1) solid #56514a;
+    border-top: calc(var(--u) * 1.2) solid transparent;
+    border-bottom: calc(var(--u) * 1.2) solid transparent;
+    transform: translateY(-50%);
+  }
+
+  .ico-x::before,
+  .ico-x::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: calc(var(--u) * 2.4);
+    height: 1px;
+    background: #56514a;
+  }
+
+  .ico-x::before { transform: translateX(-50%) rotate(45deg); }
+  .ico-x::after { transform: translateX(-50%) rotate(-45deg); }
+
+  /* ===== 控制栏 ===== */
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .controls button {
+    padding: 8px 16px;
+    background: transparent;
+    border: 1px solid #24211e;
+    border-radius: 4px;
+    color: #6b665e;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: .1em;
+    cursor: pointer;
+    transition: color .2s, border-color .2s;
+  }
+
+  .controls button:hover { color: #c9c3b8; border-color: #3a3631; }
+
+  .controls button.on {
+    color: #0b0b0b;
+    background: rgb(var(--gc));
+    border-color: rgb(var(--gc));
+  }
+
+  /* 配色那排的高亮不能跟着光色走：光换成红色时，
+     写着「绿」的按钮也跟着变红，等于在骗人 */
+  #glowctl button.on {
+    color: #eae5db;
+    background: #2a2724;
+    border-color: #4a453f;
+  }
+
+  .hint {
+    color: #33302c;
+    font-size: 11px;
+    letter-spacing: .12em;
+  }
+</style>
+</head>
+<body>
+
+  <div class="device" id="device" data-state="idle">
+
+    <!-- 系统胶囊示意：真实微信里是原生层，永远压在这个位置 -->
+    <div class="capsule"><span>···</span><i></i><span>×</span></div>
+
+    <!-- 悬浮钮：贴在胶囊下方，刻意放在旋转层之外 -->
+    <div class="fab">
+      <div class="fab-pin" id="fabPin"></div>
+      <div class="fab-menu" id="fabMenu">
+        <div class="fab-item act-dur" data-act="duration">
+          <span class="ico ico-clock"></span>时长
+        </div>
+        <div class="fab-item act-start" data-act="start">
+          <span class="ico ico-play"></span>开始
+        </div>
+        <div class="fab-item act-close" data-act="close">
+          <span class="ico ico-x"></span>关闭
+        </div>
+      </div>
+    </div>
+
+    <div class="flipper" id="flipper">
+    <div class="dot"></div>
+    <div class="glow"><div class="glow-far"></div></div>
+
+    <div class="center">
+      <div class="readout" id="readout">
+        <span class="time" id="time">14:30</span>
+      </div>
+      <div class="closedbox">已关闭提醒</div>
+    </div>
+
+    <div class="target" id="target">提醒时间 15:00</div>
+    <div class="status" id="status">翻转开始</div>
+    </div>
+  </div>
+
+  <div class="controls" id="controls">
+    <button data-go="idle" class="on">待机</button>
+    <button data-go="running">计时中</button>
+    <button data-go="final">最后一分钟</button>
+    <button data-go="alert">提醒</button>
+    <button data-go="closed">已关闭</button>
+    <button data-flip>翻转 180°</button>
+  </div>
+
+  <!-- 与小程序「光色」面板同源：三色 × 三档，全部改 --gc / --a1..3 / --fa -->
+  <div class="controls" id="glowctl">
+    <button data-gc="green" class="on">绿</button>
+    <button data-gc="red">红</button>
+    <button data-gc="blue">蓝</button>
+    <button data-k="0.72">淡</button>
+    <button data-k="1" class="on">标准</button>
+    <button data-k="1.3">浓</button>
+  </div>
+
+  <div class="hint">点右上角细棍看菜单（3 秒不动自动缩回）· 「翻转 180°」演示内容跟随旋转，细棍留在原地 · 下面一行改的是提醒光的颜色和强度，切到「提醒」才看得见</div>
+
+<script>
+  const device = document.getElementById('device')
+  const readout = document.getElementById('readout')
+  const timeEl = document.getElementById('time')
+  const statusEl = document.getElementById('status')
+
+  // 中间区永远是当前时钟；最后一分钟（final）才带上秒
+  const STATES = {
+    idle:    { text: '14:30',    sec: false, bright: false, status: '翻转开始' },
+    running: { text: '14:30',    sec: false, bright: false, status: '计时中' },
+    final:   { text: '14:29:47', sec: true,  bright: true,  status: '计时中' },
+    alert:   { text: '14:30',    sec: false, bright: false, status: '翻转或点击关闭' },
+    closed:  { text: '',         sec: false, bright: false, status: '' },
+  }
+
+  // ===== 悬浮钮：点开 → 展开，3 秒不动自己缩回 =====
+  const fabPin = document.getElementById('fabPin')
+  const fabMenu = document.getElementById('fabMenu')
+  let fabTimer = null
+
+  function closeFab() {
+    clearTimeout(fabTimer)
+    fabMenu.classList.remove('on')
+    fabPin.classList.remove('open')
+  }
+
+  fabPin.addEventListener('click', () => {
+    if (fabMenu.classList.contains('on')) return closeFab()
+    fabMenu.classList.add('on')
+    fabPin.classList.add('open')
+    clearTimeout(fabTimer)
+    fabTimer = setTimeout(closeFab, 3000)
+  })
+
+  fabMenu.addEventListener('click', (e) => {
+    if (!e.target.closest('.fab-item')) return
+    closeFab()
+  })
+
+  function render(state) {
+    const cfg = STATES[state]
+    device.dataset.state = state
+    timeEl.textContent = cfg.text
+    statusEl.textContent = cfg.status
+    readout.classList.toggle('sec', cfg.sec)
+    readout.classList.toggle('bright', cfg.bright)
+    closeFab()
+
+    document.querySelectorAll('.controls button[data-go]').forEach((btn) => {
+      btn.classList.toggle('on', btn.dataset.go === state)
+    })
+  }
+
+  // ===== 发光配色：与小程序共用同一套变量（utils/prefs.js 里那份的镜像）=====
+  const GC = { green: '94, 214, 160', red: '228, 92, 84', blue: '96, 158, 226' }
+  const BASE_ALPHA = { near: [0.38, 0.26, 0.17], far: 0.14 }
+  const root = document.documentElement
+  let glowK = 1
+
+  function applyGlow() {
+    const r3 = (v) => Math.round(v * 1000) / 1000
+    BASE_ALPHA.near.forEach((v, i) => root.style.setProperty('--a' + (i + 1), r3(v * glowK)))
+    root.style.setProperty('--fa', r3(BASE_ALPHA.far * glowK))
+  }
+
+  document.getElementById('glowctl').addEventListener('click', (e) => {
+    const btn = e.target.closest('button')
+    if (!btn) return
+    if (btn.dataset.gc) {
+      root.style.setProperty('--gc', GC[btn.dataset.gc])
+      document.querySelectorAll('#glowctl [data-gc]').forEach((x) => x.classList.toggle('on', x === btn))
+    } else {
+      glowK = Number(btn.dataset.k)
+      applyGlow()
+      document.querySelectorAll('#glowctl [data-k]').forEach((x) => x.classList.toggle('on', x === btn))
+    }
+  })
+
+  const flipper = document.getElementById('flipper')
+
+  document.getElementById('controls').addEventListener('click', (e) => {
+    const btn = e.target.closest('button')
+    if (!btn) return
+
+    if (btn.dataset.flip !== undefined) {
+      const up = flipper.classList.toggle('up')
+      btn.classList.toggle('on', up)
+      return
+    }
+
+    if (btn.dataset.go) render(btn.dataset.go)
+  })
+
+  // 用容器高度 1% 作为统一单位，等效于小程序里的 vh
+  function syncUnit() {
+    document.documentElement.style.setProperty('--u', device.clientHeight / 100 + 'px')
+  }
+
+  new ResizeObserver(syncUnit).observe(device)
+  syncUnit()
+
+  // ?s=alert 直接落到指定状态，?peak=1 把呼吸钉在最亮，?c=red&k=1.3 指定配色
+  const qs = new URLSearchParams(location.search)
+  if (qs.get('peak')) device.dataset.peak = '1'
+  if (GC[qs.get('c')]) root.style.setProperty('--gc', GC[qs.get('c')])
+  if (Number(qs.get('k'))) {
+    glowK = Number(qs.get('k'))
+    applyGlow()
+  }
+  const boot = qs.get('s')
+  if (boot && STATES[boot]) render(boot)
+</script>
+</body>
+</html>
