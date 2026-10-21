@@ -1,0 +1,56 @@
+/**
+ * 说明面板（C-7.17）
+ *
+ * 单独成文件的两个原因：
+ * 1. 它比设置面板大一圈 —— 说明是拿来读的，不是拿来点的，字号和间距都得比
+ *    「时长 / 光色」那种看一眼就走的控件大。1.26 版真机反馈「看着太小、费劲」，
+ *    于是整块 ×2：宽度 56vw→88vw，标题 2.8vh→5.6vh，正文 2.1vh→4.2vh。
+ * 2. `index.wxss` 已经贴着 C-6.4 的 400 行，说明面板的样式放这儿反而更清楚。
+ */
+
+/* 双类选择器压过 `.panel`，不受 @import 顺序影响 */
+/* 1.28：88vw + 4vw 内边距 = 96vw，两侧只剩 2vw，在宽比例屏上直接顶到屏幕圆角里，
+   边框被裁掉。宽度收到 80vw（C-7.17 的下限），合计 88vw，两侧各留 6vw 余量。
+   只动宽度：内边距和字号是"能读"这件事的一部分，缩边不能连它一起缩（C-10.1）。 */
+.panel.wide {
+  width: 80vw;
+  padding: 5vh 4vw;
+  border-radius: 2.4vh;
+}
+
+.panel.wide .panel-title {
+  font-size: 5.6vh;
+}
+
+.panel.wide .panel-hint {
+  margin: 1.4vh 0 3.4vh;
+  font-size: 4.2vh;
+}
+
+/* 正文比别处亮一档：字号放大是为了能读，颜色太暗会抵消这件事 */
+.help-list {
+  font-size: 4.2vh;
+  line-height: 1.5;
+  color: #8b857b;
+}
+
+.help-list text {
+  display: block;
+  margin-bottom: 2.6vh;
+}
+
+/* 问号图标：几何图标（时钟 / 圆环 / 三角 / 叉）里没有能表达「帮助」的形状 */
+.ico-help {
+  border: 1px solid #56514a;
+  border-radius: 50%;
+}
+
+.ico-help::after {
+  content: '?';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 1.9vh;
+  color: #56514a;
+}

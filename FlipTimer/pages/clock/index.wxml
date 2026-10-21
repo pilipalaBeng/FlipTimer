@@ -5,9 +5,11 @@
 
   <!-- 边缘悬浮钮：贴在微信胶囊（··· / ×）正下方。
        放在内容层之外 —— 胶囊是原生层，系统旋转页面时它和页面坐标系不同步。
+       待机 / 计时 / 提醒三态都要在：计时中把入口藏起来，用户就只剩长按这条路，
+       而长按是没人会去猜的隐藏操作（C-7.12）。
        收起态只是一根细棍；点开长出菜单，3 秒不动自己缩回。 -->
   <view class="fab" style="{{fabStyle}}"
-    wx:if="{{!showPanel && state !== 'running' && state !== 'closed'}}"
+    wx:if="{{!showPanel && state !== 'closed'}}"
   >
     <view class="fab-pin {{fabOpen ? 'open' : ''}}" catchtap="onToggleFab"></view>
 
@@ -20,6 +22,10 @@
         <view class="fab-item" catchtap="onOpenPanel" data-mode="glow">
           <view class="ico ico-glow"></view>
           <text>光色</text>
+        </view>
+        <view class="fab-item" catchtap="onOpenPanel" data-mode="help">
+          <view class="ico ico-help"></view>
+          <text>说明</text>
         </view>
         <view class="fab-item" catchtap="onStartTap">
           <view class="ico ico-play"></view>
@@ -70,7 +76,7 @@
 
     <!-- 设置层：间隔 / 提醒光共用一层遮罩，靠 panelMode 切换内容 -->
     <view class="panel-mask" wx:if="{{showPanel}}" catchtap="onClosePanel">
-      <view class="panel" catchtap="noop">
+      <view class="panel {{panelMode === 'help' ? 'wide' : ''}}" catchtap="noop">
 
         <block wx:if="{{panelMode === 'glow'}}">
           <view class="panel-title">提醒光</view>
@@ -100,6 +106,18 @@
               catchtap="onPickGlow"
               data-level="{{item.id}}"
             >{{item.name}}</view>
+          </view>
+        </block>
+
+        <block wx:elif="{{panelMode === 'help'}}">
+          <view class="panel-title">怎么用</view>
+          <view class="panel-hint">翻一下就开始了</view>
+
+          <view class="help-list">
+            <text>1 · 翻一下手机开始计时，屏幕边缘亮起就是到点了，再翻一下关掉</text>
+            <text>2 · 不想翻？点右上角那根小横杠，菜单里有「开始」和「关闭」</text>
+            <text>3 · 「时长」改提醒间隔，「光色」换提醒时的边缘光</text>
+            <text>4 · 计时中途想撤：长按中间的大字，或点击右上角小横杠，点「关闭」按钮</text>
           </view>
         </block>
 

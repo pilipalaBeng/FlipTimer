@@ -17,12 +17,17 @@
  *   STALL_MS      间隔超过这个数算断流：挂起再回来、被弹窗挡住都会是秒级，
  *                 中间发生了什么无从得知，积分它就是凭空造角度，直接丢帧
  *
- * ── 为什么不再只认 z 轴（2026-10-21 真机）──
- * 只积 z 轴时，**竖翻（手机上下颠倒）能认，横翻（绕屏幕纵轴转半圈、屏幕由朝自己
- * 变成朝外）一点反应都没有** —— 那个动作的角速度全在 y 轴上。用户不该记
- * "哪个方向翻才算翻"，所以改成积**当前主导轴**：三轴里谁在转就积谁。
- * 两根轴的积分不能拼在一起（斜着翻到一半换轴，凑出来的角度是假的），
- * 换轴时把攒过的作废；换轴还要防抖，手腕歪一下不算换轴，否则一次竖翻会被打断。
+ * ── 判据为什么是三轴向量积分（2026-10-21 真机，第二次修横翻）──
+ * 只积 z 轴时，竖翻（手机上下颠倒）能认，横翻（左右转手机、屏幕由朝自己变成朝外）
+ * 一点反应都没有 —— 那个动作的角速度全在 y 轴上。
+ *
+ * 第一版补丁是"挑主导轴、换轴就清零"，真机上横翻**还是不行**。原因在动作本身：
+ * 横翻是绕竖直轴的旋转，但手腕不可能只绕一根轴动，俯仰（x）分量必然掺进来，
+ * 主导轴在 x / y 之间来回跳，一换轴就清零 —— 一个连续动作被切成好几段，
+ * 每段都攒不到 150°。这不是灵敏度问题，是结构问题：**挑一根轴本身就丢信息**。
+ *
+ * 现在三根轴各自积分，用**向量模长**当总转角（`_turned()`）。
+ * 它对任意方向的翻转都成立，也不需要"换轴"这个概念 —— 没有换轴，就没有切碎。
  *
  * 积分对正负两个方向一视同仁：A→B 和 B→A 是同一条判据，天然对称，
  * 不存在「只认一个方向」这回事。
@@ -62,7 +67,6 @@ const STALL_MS = 1000 // 超过这个间隔视为断流，丢掉这一帧
 const COMMIT_LOCK_MS = 400 // 一次翻转只认一次，挡掉拆包
 const SILENT_MS = 3000 // 启动成功却迟迟不送帧，判定为「假可用」
 const POLL_MS = 1000 // 假可用判定的查询节奏，页面每个滴答问一次也不用自己记拍
-const AXIS_SWITCH_RATIO = 1.5 // 新轴要明显压过当前轴才换，手腕歪一下不算换轴
 
 const GRAV_DOT = -0.7 // 降级路径：反向区，夹角大于约 134°
 const GRAV_HOME = 0.7 // 降级路径：同向区，夹角小于约 46°
@@ -121,7 +125,9 @@ class FlipDetector {
    * pending 也清掉 —— 后台期间攒下的翻转不该回到前台后补触发一串动作。
    */
   reset() {
-    this.spin = 0
+    this.rx = 0 // 三根轴各自攒的角度（rad）
+    this.ry = 0
+    this.rz = 0
     this.spinStart = 0 // 当前这段旋转从何时开始攒角度
     this.spinDone = false
     this.doneAt = 0
@@ -130,7 +136,6 @@ class FlipDetector {
     this.baseline = null
     this.zone = null
     this.magRef = 0 // 加速度模长参考量级，随读数平滑更新
-    this.axis = null // 当前正在积分的那根轴，null 表示还没定
     this.pending = 0
     this.seenSamples = 0
     this.silentAt = 0
@@ -251,40 +256,35 @@ class FlipDetector {
     // 一段旋转有总时长上限，超时就把攒下的角度丢掉重来。
     // 判据必须在死区分支**外面**：手一直轻微动时角速度常年高于死区，
     // 只在"停下来"那一刻才判超时，就永远等不到清零，攒几次抖动会攒出一次假翻转。
-    if (this.spin !== 0 && now - this.spinStart > SPIN_HOLD_MS) this.spin = 0
+    if ((this.rx || this.ry || this.rz) && now - this.spinStart > SPIN_HOLD_MS) this._clearSpin()
 
-    const pick = this._pickOmega(v)
-    // 换轴：两根轴的积分拼在一起就是个假角度，攒过的那点直接作废
-    if (pick.axis !== this.axis) {
-      this.axis = pick.axis
-      this.spin = this.spinStart = 0
-    }
-    if (Math.abs(pick.w) < OMEGA_DEAD) {
-      this.spinDone = false // 停下来了：下一次旋转重新计数
+    // 三轴都停下来了：下一次旋转重新计数
+    if (Math.abs(v[0]) < OMEGA_DEAD && Math.abs(v[1]) < OMEGA_DEAD && Math.abs(v[2]) < OMEGA_DEAD) {
+      this.spinDone = false
       return
     }
 
-    this._accumulate(pick.w, now, dt)
+    this._accumulate(v, now, dt)
+  }
+
+  /** 攒下的这点旋转一共转过多大角度。三轴合成，不是挑一根看 */
+  _turned() {
+    return Math.sqrt(this.rx * this.rx + this.ry * this.ry + this.rz * this.rz)
+  }
+
+  _clearSpin() {
+    this.rx = this.ry = this.rz = this.spinStart = 0
   }
 
   /**
-   * 这一帧该积哪根轴的角速度。只认 z 轴的话，竖翻能认、横翻完全没反应 ——
-   * 用户不该记"哪个方向才算翻"（C-4.2）。
-   * 换轴要防抖：新轴得明显压过当前轴才换，否则一次竖翻会被手腕的歪动打断。
-   * @returns {{w:number, axis:number}} w 为 0 表示三轴都在死区里
+   * 把这一帧的角度累进去；总转角够 150° 就兑现一次，并把剩下的丢掉。
+   *
+   * 三轴各自积分再取向量模长，不做"挑主导轴"：横翻（左右转手机、屏幕朝外）
+   * 是绕竖直轴的旋转，可手腕不可能只绕一根轴动，俯仰分量必然掺进来，
+   * 主导轴在 x / y 之间来回跳 —— 按轴清零那套会把这个动作切成好几段，
+   * 每段都攒不到 150°，表现就是"竖翻好的，横翻怎么翻都没反应"。
    */
-  _pickOmega(v) {
-    const a = [Math.abs(v[0]), Math.abs(v[1]), Math.abs(v[2])]
-    const top = a[0] >= a[1] && a[0] >= a[2] ? 0 : a[1] >= a[2] ? 1 : 2
-    if (a[top] < OMEGA_DEAD) return { w: 0, axis: this.axis }
-    if (this.axis === null || this.axis === top || a[top] > a[this.axis] * AXIS_SWITCH_RATIO) {
-      return { w: v[top], axis: top }
-    }
-    return { w: v[this.axis], axis: this.axis }
-  }
-
-  /** 把这一帧的角度累进去；够 150° 就兑现一次，并把剩下的角度丢掉 */
-  _accumulate(w, now, dt) {
+  _accumulate(v, now, dt) {
     // 这一下已经兑现过了，手还在把剩下的角度转完，不许再计入。
     // 不能只靠"停下来"复位：手一直轻微动时角速度可能一直在死区上方，
     // 那样后面所有翻转都会被吞掉，所以再给一条时间兜底。
@@ -293,15 +293,17 @@ class FlipDetector {
       this.spinDone = false
     }
 
-    if (!this.spin) this.spinStart = now
-    this.spin += w * dt
-    if (Math.abs(this.spin) < TURN_RAD) return
+    if (!this.spinStart) this.spinStart = now
+    this.rx += v[0] * dt
+    this.ry += v[1] * dt
+    this.rz += v[2] * dt
+    if (this._turned() < TURN_RAD) return
 
     // 被 lock 挡下时**不清零**：留着累计量，下一帧接着试。
     // 清零再 return 等于把用户已经转过的 150° 直接扔掉，这一下就白翻了。
     if (!this._commitTurn()) return
 
-    this.spin = this.spinStart = 0
+    this._clearSpin()
     this.spinDone = true
     this.doneAt = now
   }

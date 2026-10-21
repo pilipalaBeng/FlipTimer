@@ -1,4 +1,5 @@
 @import "../../styles/glow.wxss";
+@import "../../styles/help.wxss";
 
 /* ===== 舞台 ===== */
 .stage {
@@ -104,6 +105,7 @@
   position: absolute;
   right: 5vw;
   bottom: 2.8vh;
+  white-space: nowrap;
   font-size: 2.4vh;
   color: #423e38;
   letter-spacing: 0.08em;

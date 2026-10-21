@@ -167,11 +167,18 @@ check('C-2.8', '面板开着时翻转只收面板，不启动计时', () => {
   return '翻转先收面板，不动计时'
 })
 
-check('C-2.6', '状态反馈不重复', () => {
+check('C-2.6', '状态反馈不重复，且文案是人的口气', () => {
   const js = read(PAGE_JS)
   assert(/state: 'closed'[^}]*statusText: ''/.test(js), 'closed 态底部小字未清空，与中间大字重复')
   assert(!/alert-sub/.test(read(PAGE_WXML)), '提醒态出现第二处关闭提示，与底部小字重复')
-  return 'closed 只留大字，alert 只留一句'
+
+  // 「已关闭提醒」那种是系统日志：用户刚翻完手机，再告诉他"你关闭了提醒"等于零信息。
+  // 这一屏只有 1.5 秒，超过三个字读不完也等于没写。
+  for (const m of js.matchAll(/NOTICE_(?:CLOSED|CANCELED) = '([^']*)'/g)) {
+    assert(!/已/.test(m[1]), `反馈文案「${m[1]}」是系统播报体，要写成人的口气`)
+    assert(m[1].length <= 3, `反馈文案「${m[1]}」太长，1.5 秒读不完`)
+  }
+  return 'closed 只留一句人话'
 })
 
 check('C-2.7', '计时中可长按取消，且不落回提醒态', () => {
@@ -186,7 +193,14 @@ check('C-2.7', '计时中可长按取消，且不落回提醒态', () => {
   assert(/state === 'running'/.test(long), '长按未判断 running 态')
   assert(/cancelRound\(\)/.test(long), '长按未调用 cancelRound')
   assert(/bindlongpress="onMainLongPress"/.test(read(PAGE_WXML)), 'wxml 未绑定长按事件')
-  return '长按中央区取消'
+
+  // 第二条入口：菜单里的「取消」。它必须落到同一个 cancelRound，
+  // 不能自己拼一套"清计时 + 弹提示"的流程
+  const menu = methodBody(src, 'onCloseTap')
+  assert(/cancelRound\(\)/.test(menu), '菜单里的取消没落到 cancelRound')
+  assert(/state === 'running'/.test(menu), '菜单取消没判断 running 态')
+  assert(/bindlongpress|onCloseTap/.test(read(PAGE_WXML)), 'wxml 未绑定菜单项事件')
+  return '长按 + 菜单两条入口，同一个出口'
 })
 
 // ===== 第三章 时间 =====
@@ -236,6 +250,13 @@ check('C-3.7', '页面不自行赋值 targetTs', () => {
   return '赋值只在 countdown 内部'
 })
 
+check('C-3.8', '右下角提醒时刻带秒', () => {
+  const fmt = read('utils/format.js')
+  assert(/function formatTarget[\s\S]*?'提醒时间 ' \+ formatHMS\(/.test(fmt), '提醒时刻退回只到分，用户等到整分没响会以为坏了')
+  assert(/nowrap/.test(read(PAGE_WXSS).match(/\.target\s*\{[^}]*\}/)[0]), '角标没禁折行，长了会断成两行')
+  return '提醒时刻 HH:mm:ss'
+})
+
 // ===== 第四章 传感器 =====
 check('C-4.1', '主判据走陀螺仪，不用已废弃的方向接口', () => {
   const src = read(PAGE_JS) + read(FLIP_JS)
@@ -251,19 +272,34 @@ check('C-4.1', '主判据走陀螺仪，不用已废弃的方向接口', () => {
   return '陀螺仪为主，加速度计降级'
 })
 
-check('C-4.2', '判据是角速度积分（认主导轴），且单位换算正确', () => {
+check('C-4.2', '判据是三轴向量积分，且单位换算正确', () => {
   const src = read(FLIP_JS)
   const body = methodBody(src, '_handleGyro')
   assert(body, '未找到 _handleGyro')
-  // 积分本体在 _accumulate 里，变量是主导轴读数 w（原来写死 z，横翻会没反应）
-  assert(/this\.spin \+= w \* dt/.test(methodBody(src, '_accumulate')), '没有做角速度积分')
-  // 不许退回只认 z 轴：竖翻能认、横翻（绕纵轴转半圈）一点反应都没有
-  const pick = methodBody(src, '_pickOmega')
-  assert(pick, '缺少主导轴挑选，退回只认某一根轴')
-  assert(/v\[0\]/.test(pick) && /v\[1\]/.test(pick) && /v\[2\]/.test(pick), '只看了部分轴')
-  assert(/AXIS_SWITCH_RATIO/.test(pick), '换轴没有防抖，手腕歪一下就会打断正常翻转')
-  // 换轴必须把已攒的角度作废：两根轴的积分拼起来就是个假角度
-  assert(/this\.spin = this\.spinStart = 0/.test(body), '换轴时没作废已攒角度')
+  const acc = methodBody(src, '_accumulate')
+  // 三根轴各自积分。只积一根、或者"挑主导轴再换轴清零"，都会把复合运动切碎：
+  // 横翻时手腕必然带俯仰，主分量在 x / y 之间来回抢（真机就是这么翻不动）
+  assert(
+    /this\.rx \+= v\[0\] \* dt/.test(acc) &&
+      /this\.ry \+= v\[1\] \* dt/.test(acc) &&
+      /this\.rz \+= v\[2\] \* dt/.test(acc),
+    '三轴没有各自积分，复合运动会被切碎',
+  )
+  // 总转角必须是三轴合成，不许只看某根轴
+  assert(
+    /Math\.sqrt\(this\.rx \* this\.rx \+ this\.ry \* this\.ry \+ this\.rz \* this\.rz\)/.test(
+      methodBody(src, '_turned'),
+    ),
+    '总转角没做三轴合成',
+  )
+  assert(!/_pickOmega|AXIS_SWITCH_RATIO/.test(src), '残留"挑主导轴 / 换轴清零"那套')
+  // 死区必须三轴都停才算停
+  assert(
+    /Math\.abs\(v\[0\]\) < OMEGA_DEAD && Math\.abs\(v\[1\]\) < OMEGA_DEAD && Math\.abs\(v\[2\]\) < OMEGA_DEAD/.test(
+      body,
+    ),
+    '死区只看了一根轴',
+  )
   // dt 是毫秒，乘 rad/s 之前必须换成秒；漏了这一步会放大一千倍，什么都触发。
   // 换算现在收在 _dtSeconds 里（断流判定也住那儿），所以查方法体而非 _handleGyro
   assert(/\/ 1000/.test(methodBody(src, '_dtSeconds')), 'dt 没换算成秒，积分放大一千倍')
@@ -284,7 +320,8 @@ check('C-4.3', '两个方向一视同仁，动作走队列不丢', () => {
   // 判据里不许再出现"上一次翻转是否已用过"这种单向状态 —— 那正是"只认一侧"的来源
   assert(!/this\.armed/.test(flip), '又回到 armed 那套单向记账了')
   assert(!/rearm\(/.test(flip), '残留 rearm')
-  assert(/Math\.abs\(this\.spin\) < TURN_RAD/.test(flip), '判据没对正负两个方向取绝对值')
+  // 判据天然不分方向：三轴积分取模长（_turned），正转反转走同一条式子
+  assert(/this\._turned\(\) < TURN_RAD/.test(flip), '判据没对两个方向一视同仁')
 
   // 姿态渲染会碰 setData。它一旦出岔子，动作不能跟着一起消失 ——
   // 真机上"内容转过来了、计时没起来"就是这么来的。先记账，再渲染。
@@ -322,7 +359,7 @@ check('C-4.5', 'onShow 启动、onHide 停止传感器', () => {
 check('C-4.6', '传感器失败有纯点击降级', () => {
   const src = read(PAGE_JS)
   assert(/markFlipUnavailable/.test(src), '缺少降级处理')
-  assert(/点右上小钮开始/.test(src), '降级文案缺失')
+  assert(/点右上角小横杠开始/.test(src), '降级文案缺失')
   assert(/onStartTap/.test(src) && /onCloseTap/.test(src), '缺少按钮备用路径')
   return '降级 + 按钮'
 })
@@ -619,7 +656,14 @@ check('C-7.12', '收起态只是一根细棍，展开才长出菜单', () => {
   assert(/pointer-events:\s*none/.test(menu[0]), '收起态菜单还接收点击，会误触')
   const on = css.match(/\n\.fab-menu\.on\s*\{[^}]*\}/)
   assert(on && /pointer-events:\s*auto/.test(on[0]), '展开态菜单点不动')
-  return '细棍常驻，菜单按需展开'
+
+  // 三态都得出得来：计时态藏掉的话，用户想中途取消只剩没人会猜的长按
+  const wxml = read(PAGE_WXML)
+  const fabIf = wxml.match(/class="fab"[^>]*wx:if="([^"]+)"/)
+  assert(fabIf, '未找到悬浮钮的显示条件')
+  assert(!/state !== 'running'/.test(fabIf[1]), '计时中把悬浮钮藏了，用户没法手动取消（C-2.7）')
+  assert(/state !== 'closed'/.test(fabIf[1]), 'closed 反馈期不该显示，会挡着那句大字')
+  return '三态可达，菜单按需展开'
 })
 
 check('C-7.13', '菜单会自己缩回，点空白优先收起', () => {
@@ -687,6 +731,27 @@ check('C-7.16', '提醒光不靠动画独撑，animation 被掐掉也还在', ()
   assert(/opacity:\s*1/.test(on[0]), '.glow-on 没有静态 opacity 兜底，动画被禁用时整块光消失')
   assert(/animation:\s*breathe/.test(on[0]), '.glow-on 没接呼吸动画')
   return '静态兜底 + 呼吸叠加'
+})
+
+check('C-7.17', '菜单里有「说明」入口，面板是纯文字说明', () => {
+  const wxml = read(PAGE_WXML)
+  assert(/data-mode="help"/.test(wxml), '菜单里没有「说明」入口，新用户不知道该翻手机')
+  assert(/panelMode === 'help'/.test(wxml), '没有对应的说明面板')
+
+  const list = wxml.match(/class="help-list"[\s\S]*?<\/view>/)
+  assert(list, '说明内容没放进 help-list')
+  const rows = (list[0].match(/<text>/g) || []).length
+  assert(rows >= 3 && rows <= 5, `说明 ${rows} 条，超出 3~5 条的范围`)
+  assert(!/onStartTap|onCloseTap/.test(list[0]), '说明面板里塞了动作按钮，说明只负责解释')
+
+  // 说明面板的样式独立成 styles/help.wxss（自带尺寸与字号，见 C-7.17）
+  const help = read('styles/help.wxss')
+  assert(/\.help-list\s*\{[^}]*\}/.test(help), '缺少 help-list 样式')
+  // 它是拿来读的，字号必须比设置面板大一档，否则真机上「看着费劲」
+  const size = help.match(/\.help-list\s*\{[^}]*font-size:\s*([\d.]+)vh/)
+  assert(size && Number(size[1]) >= 4, `说明正文 ${size && size[1]}vh，太小了`)
+  assert(/\.panel\.wide\s*\{[^}]*width:\s*8\dvw/.test(help), '说明面板没放大，长句子会挤成一堆')
+  return `菜单有说明入口，${rows} 条说明，正文 ${size[1]}vh`
 })
 
 check('C-11.1', '业务代码无 console 残留', () => {

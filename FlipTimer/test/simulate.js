@@ -195,9 +195,12 @@ check('立着翻转 180° → 开始计时', () => {
   assert.strictEqual(page.data.statusText, '计时中')
 })
 
-check('右下角角标写「提醒时间 HH:mm」', () => {
-  assert.match(page.data.targetText, /^提醒时间 \d{2}:\d{2}$/)
+check('右下角角标写「提醒时间 HH:mm:ss」', () => {
+  assert.match(page.data.targetText, /^提醒时间 \d{2}:\d{2}:\d{2}$/)
   assert.strictEqual(page.data.targetText, formatTarget(page.countdown.targetTs))
+  // 只到分的话，10:48:41 的提醒会显示成 10:48，用户等到 10:48:00 没响会以为坏了
+  const sec = new Date(page.countdown.targetTs).getSeconds()
+  assert.strictEqual(page.data.targetText.slice(-2), ('0' + sec).slice(-2), '提醒时刻没带到秒')
 })
 
 // 核心语义：中间区永远是当前时间，不是剩余时间。
@@ -282,7 +285,9 @@ check('提醒态翻转 180° → 关闭提醒', () => {
   spin(180, 800)
   assert.strictEqual(page.data.state, 'closed')
   assert.strictEqual(page.data.mainText, '')
-  // 中间已有「已关闭提醒」大字，底部不重复
+  // 中间只有一句人话，不复述"你关闭了提醒"
+  assert.strictEqual(page.data.noticeText, '好了')
+  // 底部不重复
   assert.strictEqual(page.data.statusText, '')
 })
 
@@ -397,6 +402,37 @@ check('斜着翻到一半换轴：两根轴的角度不许拼成一次假翻转'
   rest(200)
   spin(100, 500, 'z') // 换竖翻再转一半，100° + 100° 凑成 200° 就是假翻转
   assert.strictEqual(p.data.state, 'idle', '两个轴的角度被拼起来了')
+  p.onHide()
+})
+
+check('横翻时手腕带俯仰（两根轴轮流占优），仍算一次翻转', () => {
+  const p = freshPage()
+  rest(1500)
+  // 真机动作：左右转手机，俯仰分量一直掺着，主分量在 x / y 之间来回抢。
+  // 按"挑主导轴、换轴清零"那套会把这一下切成好几段，每段都不够 150°。
+  const frames = Math.round(900 / 20)
+  const w = (Math.PI / 0.9) * 1.0
+  for (let i = 0; i < frames; i++) {
+    vnow += 20
+    const flip = i % 2 === 0
+    for (const h of gyroHandlers) h({ x: w * (flip ? 0.6 : 1), y: w * (flip ? 1 : 0.6), z: 0 })
+    tick()
+  }
+  assert.strictEqual(p.data.state, 'running', '复合运动被切碎了，横翻没认出来')
+  p.onHide()
+})
+
+check('斜着翻（绕 45° 方向的轴转半圈）同样算', () => {
+  const p = freshPage()
+  rest(1500)
+  const frames = Math.round(800 / 20)
+  const w = Math.PI / 0.8 / Math.SQRT2 // x、y 各分一半，合起来正好 180°
+  for (let i = 0; i < frames; i++) {
+    vnow += 20
+    for (const h of gyroHandlers) h({ x: w, y: w, z: 0 })
+    tick()
+  }
+  assert.strictEqual(p.data.state, 'running', '斜翻没认出来')
   p.onHide()
 })
 
@@ -542,7 +578,7 @@ check('计时中长按中央区 → 取消本轮，不进提醒态', () => {
   page.actionLockUntil = 0
   page.onMainLongPress()
   assert.strictEqual(page.data.state, 'closed')
-  assert.strictEqual(page.data.noticeText, '已取消本轮')
+  assert.strictEqual(page.data.noticeText, '算了')
   assert.strictEqual(page.data.targetText, '', '取消后不该再显示目标时刻')
 })
 
@@ -679,7 +715,7 @@ check('翻转启动后一直没倒手，提醒来了翻回一下就关掉', () =
 })
 
 // 防误启动只有一层：showClosed 的 1.5 秒反馈期。
-// 反馈期内翻转被忽略（用户还在看"已关闭提醒"），反馈期一过翻转立刻生效。
+// 反馈期内翻转被忽略（用户还在看那一下反馈），反馈期一过翻转立刻生效。
 // 这条守的是两边：窗口内不被误开、窗口外不许失灵。
 check('关闭反馈期内翻转被忽略，反馈期一过立刻能启动', () => {
   const p = freshPage()
@@ -790,7 +826,7 @@ check('传感器起来了却一帧不送 → 判为不可用，改走点击路�
   rest(4500)
   gyroHandlers = saved
   assert.strictEqual(p.data.flipAvailable, false, '假可用没被判出来')
-  assert.strictEqual(p.data.statusText, '点右上小钮开始', '没有改成点击提示')
+  assert.strictEqual(p.data.statusText, '点右上角小横杠开始', '没有改成点击提示')
   p.onHide()
 })
 
@@ -881,6 +917,30 @@ check('面板开着时翻转只收面板，不把计时开起来（C-2.8）', ()
   rest(1500) // 让"一次翻转只认一次"的保护期过去
   spin(-180, 800)
   assert.strictEqual(p.data.state, 'running', '面板收掉之后翻转就该照常启动')
+  p.onHide()
+})
+
+check('计时中从右上菜单取消本轮，不落进提醒态', () => {
+  const p = freshPage()
+  rest(1200)
+  p.beginRound()
+  assert.strictEqual(p.data.state, 'running')
+  p.onCloseTap() // 菜单项在计时态发的是「取消」，和长按同一个出口
+  assert.strictEqual(p.data.state, 'closed')
+  assert.strictEqual(p.data.noticeText, '算了')
+  rest(2000)
+  assert.strictEqual(p.data.state, 'idle', '取消后该回待机')
+  p.onHide()
+})
+
+check('菜单里的「说明」打开使用说明面板，点空白能关掉', () => {
+  const p = freshPage()
+  rest(1200)
+  p.onOpenPanel({ currentTarget: { dataset: { mode: 'help' } } })
+  assert.strictEqual(p.data.showPanel, true, '说明面板没打开')
+  assert.strictEqual(p.data.panelMode, 'help')
+  p.onClosePanel()
+  assert.strictEqual(p.data.showPanel, false, '点空白没关掉面板')
   p.onHide()
 })
 

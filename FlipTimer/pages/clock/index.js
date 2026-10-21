@@ -13,8 +13,10 @@ const CLOSED_HOLD_MS = 1500
 const ACTION_LOCK_MS = 400
 const FINAL_MS = 60000
 
-const NOTICE_CLOSED = '已关闭提醒'
-const NOTICE_CANCELED = '已取消本轮'
+// 结束时的反馈文案：用人的口气，不复述用户刚做的动作。
+// 「已关闭提醒」那种是系统日志 —— 他刚翻完手机，再被告知"你关闭了提醒"等于零信息。
+const NOTICE_CLOSED = '好了'
+const NOTICE_CANCELED = '算了'
 
 Page({
   data: {
@@ -291,7 +293,9 @@ Page({
     if (this.data.state === 'idle') this.handleAction()
   },
 
+  /** 菜单里的停止项：提醒态关闭提醒，计时态取消本轮（两个出口各走各的状态迁移） */
   onCloseTap() {
+    if (this.data.state === 'running') return this.cancelRound()
     if (this.data.state === 'alert') this.handleAction()
   },
 
@@ -379,7 +383,7 @@ Page({
 
   idleHint(flipAvailable) {
     const ok = flipAvailable === undefined ? this.data.flipAvailable : flipAvailable
-    return ok ? '翻转开始' : '点右上小钮开始'
+    return ok ? '翻转开始' : '点右上角小横杠开始'
   },
 
   markFlipUnavailable() {
